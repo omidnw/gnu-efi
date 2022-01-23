@@ -2,7 +2,81 @@
 #include <elf.h>
 #include <efilib.h>
 
+// this is a not normal define, two variables need to be define for initialize header font.
+
+#define fontidentifier_magic0 0x36
+#define fontidentifier_magic1 0x04
+
+// finish definition.
+
+// typedef
+
 typedef unsigned long long size_t;
+
+// font struct.
+
+typedef struct{
+	unsigned char fontidentifier[2]; // magic array.
+	unsigned char fontmode; // font mode.
+	unsigned char charactersize; // size of character
+
+} PSFone_HEADER;
+
+typedef struct{
+	PSFone_HEADER* psfone_HEADER;
+	void* glyphBuffer;
+} PSFone_Font;
+
+// finish
+
+// initialize all functions.
+
+EFI_FILE* LoadFile(EFI_FILE* Directory, CHAR16* Path, EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable);
+int memcmp(const void* firstpointer, const void* secondpointer, size_t x);
+PSFone_Font* LoadPSFFont(EFI_FILE* Directory, CHAR16* Path, EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable);
+
+// finish initialization.
+
+// initialize font reader
+
+PSFone_Font* LoadPSFFont(EFI_FILE* Directory, CHAR16* Path, EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+{
+	EFI_FILE* font = LoadFile(Directory, Path, ImageHandle, SystemTable);
+	if(font == NULL)
+	{
+		return NULL; // check file exists.
+	}
+	PSFone_HEADER* fontHeader;
+	SystemTable->BootServices->AllocatePool(EfiLoaderData, sizeof(PSFone_HEADER), (void**)&fontHeader);
+	UINTN size = sizeof(PSFone_HEADER);
+	font->Read(font, &size, fontHeader);
+	if(fontHeader->fontidentifier[0] != fontidentifier_magic0 || 
+	fontHeader->fontidentifier[1] != fontidentifier_magic1)
+	{
+		return NULL;
+	}
+	UINTN glyphBufferSize = fontHeader->charactersize * 256;
+	if(fontHeader->fontmode == 1)// 512 glyph mode
+	{
+		glyphBufferSize = fontHeader->charactersize * 512;
+	}
+	void* glyphBuffer;
+	{
+		font->SetPosition(font, sizeof(PSFone_HEADER));
+		SystemTable->BootServices->AllocatePool(EfiLoaderData, glyphBufferSize, (void**)&glyphBuffer);
+		font->Read(font, &glyphBufferSize, glyphBuffer);
+	}
+
+	PSFone_Font* fontloader;
+	SystemTable->BootServices->AllocatePool(EfiLoaderData, sizeof(PSFone_Font), (void**)&fontloader);
+	fontloader->psfone_HEADER = fontHeader;
+	fontloader->glyphBuffer = glyphBuffer;
+	return fontloader;
+}
+
+// Finish initialization
+
+// initialize Graphic Output Protocol
 
 typedef struct{
 	void* BaseAddress;
@@ -41,6 +115,10 @@ FrameBuffer* InitializeGOP()
 	return &framebuffer;
 }
 
+// Finish
+
+// initialize memory compare function
+
 int memcmp(const void* firstpointer, const void* secondpointer, size_t x) // verify bootloader and kernel os.
 {
 	const unsigned char *a = firstpointer, *b = secondpointer;
@@ -57,7 +135,11 @@ int memcmp(const void* firstpointer, const void* secondpointer, size_t x) // ver
 	}
 	return 0;
 }
+
+// Finish
+
 // loadfile created to load kernel file.
+
 EFI_FILE* LoadFile(EFI_FILE* Directory, CHAR16* Path, EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
 	EFI_FILE* LoadedFile; // create loadfile
@@ -86,6 +168,10 @@ EFI_FILE* LoadFile(EFI_FILE* Directory, CHAR16* Path, EFI_HANDLE ImageHandle, EF
 		return LoadedFile;
 	}
 }
+
+// Finish
+
+// EFI start point
 
 EFI_STATUS efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
 	InitializeLib(ImageHandle, SystemTable); // Initialize imagetable and systemtable.
@@ -159,9 +245,21 @@ EFI_STATUS efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
 
 	Print(L"Kernel Loaded Successfully\n\r");
 
-	void(*KernelStart)(FrameBuffer*) = ((__attribute__((sysv_abi)) void(*)(FrameBuffer*)) header.e_entry);
+	void(*KernelStart)(FrameBuffer*, PSFone_Font*) = ((__attribute__((sysv_abi)) void(*)(FrameBuffer*, PSFone_Font*)) header.e_entry);
 
 	FrameBuffer* MainGOPBuffer = InitializeGOP();
+
+	// Directory == NULL means root directory.
+	PSFone_Font* newFontload = LoadPSFFont(NULL, L"zap-ext-light16.psf", ImageHandle, SystemTable);
+
+	if(newFontload == NULL)
+	{
+		Print(L"font not found\n\r");
+	}
+	else
+	{
+		Print(L"font found. character size: %d\n\r", newFontload->psfone_HEADER->charactersize);
+	}
 
 	/*
 
@@ -181,7 +279,9 @@ EFI_STATUS efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
 
 	*/
 
-	KernelStart(MainGOPBuffer);
+	KernelStart(MainGOPBuffer, newFontload);
 
 	return EFI_SUCCESS; // Exit the UEFI Application
 }
+
+// Finish
