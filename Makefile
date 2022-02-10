@@ -87,6 +87,9 @@ clean:
 		fi; \
 	done
 
+setup:
+	make
+
 install:
 	@for d in $(SUBDIRS); do \
 		mkdir -p $(OBJDIR)/$$d; \
